@@ -7,7 +7,7 @@ from statsmodels.tsa.ar_model import AutoReg
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
 def read_eog(folder_path):
@@ -15,13 +15,11 @@ def read_eog(folder_path):
     classes = os.listdir(folder_path)
     class_data = {}
     for folder in classes:
-        # Class Path = Each class path
         class_path = os.path.join(folder_path, folder)
         files = (os.listdir(class_path))
         signals = []
         for file in files:
             file_path = os.path.join(class_path, file)
-            # print(file_path)
             with open(file_path, 'r') as f:
                 signal = [int(line.strip()) for line in f]
                 signals.append(signal)
@@ -53,7 +51,6 @@ def bandpass_butter_filter(signal, fs=250, lowcut=1, highcut=20, order=2):
 
 def apply_bandpass_filter(signal_dict):
     filtered_signal_dict = {}
-    # apply BPF 5 times one for each class
     for cls, signal_list in signal_dict.items():
         filtered_signal_listOflists = bandpass_butter_filter(signal_list)
         filtered_signal_dict[cls] = filtered_signal_listOflists
@@ -93,18 +90,11 @@ def apply_normalization(filtered_signal_dict):
     return normalized_signal_dict
 
 
-def preprocess_data():
-    eog_signal = read_eog("X:/AH/24_25_2/HCI/Project/Dataset/class")
-    filtered_signal = apply_bandpass_filter(eog_signal)
-    dc_free_signal = apply_dc_removal(filtered_signal)
-    final_normalized_data = apply_normalization(dc_free_signal)
-    return final_normalized_data
-
 
 def ar_coeffs_calc(signal_listOflists):
     extracted_coeffs = []
     for l in signal_listOflists:
-        model = AutoReg(l, lags=4)
+        model = AutoReg(l, lags=16)
         model_fit = model.fit()
         ar_coeffs = model_fit.params
         extracted_coeffs.append(list(ar_coeffs))
@@ -122,7 +112,7 @@ def extract_AR_coefficients(normalized_signal_dict):
 def wavelet_coeffs(signal):
     decomposed = []
     for l in signal:
-        y = wavedec(data=l, wavelet='db3', level=4)
+        y = wavedec(data=l, wavelet='db3', level=6)
         decomposed.append(list(y[1]) + list(y[2]) + list(y[3]) + list(y[4]))
     return decomposed
 
@@ -135,7 +125,7 @@ def extract_wavelet_coeffs(normalized_signal_dict):
     return extracted_wavelet_coeffs
 
 
-def svm_classifier(features_dict: dict):
+def svm_classifier(features_dict: dict, kernel, c):
     x = []
     y = []
     for class_name, feature_sets in features_dict.items():
@@ -148,25 +138,41 @@ def svm_classifier(features_dict: dict):
     X = np.array(x)
     X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.3, random_state=42)
 
-    svm = SVC(kernel='rbf', C=1.0, gamma='scale')
+    # scaler = StandardScaler()
+    # X_train = scaler.fit_transform(X_train)
+    # X_test = scaler.transform(X_test)
+
+    svm = SVC(kernel=kernel, C=c, gamma='scale', class_weight='balanced')
     svm.fit(X_train, y_train)
 
     y_pred = svm.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
     print(f"Accuracy: {accuracy * 100:.2f}%")
     class_names = label_encoder.classes_
-    print(classification_report(y_test, y_pred, target_names=class_names))
-
+    # print(classification_report(y_test, y_pred, target_names=class_names))
+    # cm = confusion_matrix(y_test, y_pred)
+    # disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+    # disp.plot(cmap='Blues')
+    # plt.title("Confusion Matrix")
+    # plt.show()
     return svm, accuracy
+
+
+
+def preprocess_data():
+    eog_signal = read_eog("X:/AH/24_25_2/HCI/Project/Dataset/class")
+    filtered_signal = apply_bandpass_filter(eog_signal)
+    dc_free_signal = apply_dc_removal(filtered_signal)
+    final_normalized_data = apply_normalization(dc_free_signal)
+    return final_normalized_data
 
 
 preprocessed_data = preprocess_data()
 ar = extract_AR_coefficients(preprocessed_data)
 wavelets = extract_wavelet_coeffs(preprocessed_data)
-svm_classifier(ar)
-svm_classifier(wavelets)
-# ar_values = list(ar.values())
-# print(ar_values[0])
-# print(len(ar_values[0]))
+
+
+svm_classifier(ar, 'rbf', 10)
+svm_classifier(wavelets, 'rbf', 10)
 
 
