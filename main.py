@@ -27,6 +27,32 @@ def read_eog(folder_path):
     return class_data
 
 
+def read_paired_eog(folder_path):
+    classes = os.listdir(folder_path)
+    class_data = {'horizontal': {}, 'vertical': {}}
+
+    for folder in classes:
+        class_path = os.path.join(folder_path, folder)
+        files = os.listdir(class_path)
+        h_signals = []
+        v_signals = []
+
+        for file in files:
+            if file.endswith('h.txt'):
+                with open(os.path.join(class_path, file), 'r') as f:
+                    signal = [int(line.strip()) for line in f]
+                    h_signals.append(signal)
+            elif file.endswith('v.txt'):
+                with open(os.path.join(class_path, file), 'r') as f:
+                    signal = [int(line.strip()) for line in f]
+                    v_signals.append(signal)
+
+        class_data['horizontal'][folder] = h_signals
+        class_data['vertical'][folder] = v_signals
+
+    return class_data
+
+
 def plot_signal(signal):
     plt.figure(figsize=(12, 6))
     plt.xlabel("time")
@@ -125,6 +151,40 @@ def extract_wavelet_coeffs(normalized_signal_dict):
     return extracted_wavelet_coeffs
 
 
+def extract_statistical_features(signal):
+    features = []
+    for s in signal:
+        mean = np.mean(s)
+        std = np.std(s)
+        variance = np.var(s)
+        energy = np.sum(np.square(s))
+        
+        stat_features = [mean, std, variance, energy]
+        features.append(stat_features)
+    
+    return features
+
+
+def extract_all_statistical_features(normalized_signal_dict):
+    stat_features_dict = {}
+    for cls, signal_list in normalized_signal_dict.items():
+        extracted_stat_features = extract_statistical_features(signal_list)
+        stat_features_dict[cls] = extracted_stat_features
+    return stat_features_dict
+
+
+def combine_features(ar, wavelets, stats):
+    combined_features = {}
+    for cls in ar.keys():
+        combined_features[cls] = []
+        for i in range(len(ar[cls])):
+            # Concatenate features from all sources
+            feature_vector = ar[cls][i] + wavelets[cls][i] + stats[cls][i]
+            combined_features[cls].append(feature_vector)
+    return combined_features
+
+
+
 def svm_classifier(features_dict: dict, kernel, c):
     x = []
     y = []
@@ -164,15 +224,31 @@ def preprocess_data():
     filtered_signal = apply_bandpass_filter(eog_signal)
     dc_free_signal = apply_dc_removal(filtered_signal)
     final_normalized_data = apply_normalization(dc_free_signal)
-    return final_normalized_data
+    return final_normalized_data, eog_signal
 
 
-preprocessed_data = preprocess_data()
+preprocessed_data, eog = preprocess_data()
+
 ar = extract_AR_coefficients(preprocessed_data)
+
 wavelets = extract_wavelet_coeffs(preprocessed_data)
+
+stat_features = extract_all_statistical_features(preprocessed_data)
+
+combined_features = combine_features(ar, wavelets, stat_features)
+# print(len(preprocessed_data.keys()))
+# print(len(preprocessed_data.values()))
+#
+# print(len(preprocessed_data['Blink']))
+# print(len(preprocessed_data['Up']))
+# print(len(preprocessed_data['Down']))
+# print(len(preprocessed_data['Left']))
+# print(len(preprocessed_data['Right']))
+
 
 
 svm_classifier(ar, 'rbf', 10)
 svm_classifier(wavelets, 'rbf', 10)
-
+svm_classifier(stat_features, 'linear', 100)
+svm_classifier(combined_features, 'rbf', 10)
 
