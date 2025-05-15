@@ -45,7 +45,7 @@ def plot_signal(signal, title="Signal Plot"):
     plt.show()
 
 
-def bandpass_butter_filter(signal, fs=250, lowcut=1, highcut=20, order=2):
+def bandpass_butter_filter(signal, fs=176, lowcut=1, highcut=20, order=2):
     nyquist = 0.5 * fs
     low = lowcut / nyquist
     high = highcut / nyquist
@@ -127,25 +127,10 @@ def extract_AR_coefficients(normalized_signal_dict):
 
 def wavelet_coeffs(signal):
     decomposed = []
-    max_coeffs_length = 0
-    
-    # First pass to find the maximum length
     for l in signal:
-        y = wavedec(data=l, wavelet='db3', level=6)
-        coeffs = list(y[1]) + list(y[2]) + list(y[3]) + list(y[4])
-        max_coeffs_length = max(max_coeffs_length, len(coeffs))
-
-    
-    # Second pass to create vectors of uniform length
-    for l in signal:
-        y = wavedec(data=l, wavelet='db3', level=6)
-        coeffs = list(y[1]) + list(y[2]) + list(y[3]) + list(y[4])
-
-        # Pad with zeros if necessary to make all feature vectors the same length
-        if len(coeffs) < max_coeffs_length:
-            coeffs = coeffs + [0] * (max_coeffs_length - len(coeffs))
+        y = wavedec(data=l, wavelet='db3', level=2)
+        coeffs = list(y[0])
         decomposed.append(coeffs)
-
     return decomposed
 
 
@@ -232,7 +217,7 @@ def svm_classifier(features_dict, kernel='rbf', c=10):
     for class_name, feature_sets in features_dict.items():
         for feature_set in feature_sets:
             feature_lengths.add(len(feature_set))
-    
+    print(feature_lengths)
     if len(feature_lengths) > 1:
         print(f"Warning: Found inconsistent feature vector lengths: {feature_lengths}")
         
@@ -322,59 +307,4 @@ svm_classifier(h_v_stat, 'rbf', 10)
 
 print("ALL FEATURES MODEL ACCURACY")
 svm_classifier(merged_features, 'rbf', 10)
-# optimize_svm(merged_features)
 
-
-
-# def main():
-#     # Preprocess data
-#
-#
-#     # Extract features from both horizontal and vertical signals
-#     print("Extracting AR coefficients...")
-#
-#
-#     print("Extracting wavelet coefficients...")
-#
-#
-#     print("Extracting statistical features...")
-#
-#
-#     # 1. Combine features by direction first
-#     print("Combining features by direction...")
-#
-#
-#     # 2. Merge horizontal and vertical features
-#     print("Merging horizontal and vertical features...")
-#
-#
-#     # Classification with individual feature types (combined H+V)
-#     print("\nClassifying with AR coefficients only (H+V)...")
-#
-#
-#     print("\nClassifying with Wavelet coefficients only (H+V)...")
-#
-#
-#     print("\nClassifying with Statistical features only (H+V)...")
-#     h_v_stats = merge_horizontal_vertical_features({'horizontal': stats['horizontal'], 'vertical': stats['vertical']})
-#     svm_classifier(h_v_stats, 'linear', 100)
-#
-#     # Classification with all combined features
-#     print("\nClassifying with all combined features (H+V)...")
-#     # model, accuracy, encoder = svm_classifier(merged_features, 'rbf', 10)
-#
-#     # Optimize model parameters
-#     print("\nOptimizing model with all combined features...")
-#     best_model, best_accuracy, best_encoder = optimize_svm(merged_features)
-#
-#     return merged_features, best_model, best_encoder
-#
-#
-# if __name__ == "__main__":
-#     features, model, encoder = main()
-#     print("\nFeature dimensions:")
-#     for cls, feature_sets in features.items():
-#         if feature_sets:
-#             print(f"{cls}: {len(feature_sets)} samples, {len(feature_sets[0])} features")
-#
-#     print(f"\nFinal model accuracy: {model[1] * 100:.2f}%")
