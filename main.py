@@ -103,53 +103,6 @@ def apply_normalization(filtered_signal_dict):
     return normalized_signal_dict
 
 
-def adaptive_trim_signal(signals, threshold=0.1, window_size=10):
-    """Trim signals to focus on the most relevant parts based on signal energy"""
-    trimmed_signals = []
-    for signal in signals:
-        # Calculate moving average of signal energy
-        energy = np.square(signal)
-        energy_smooth = np.convolve(energy, np.ones(window_size)/window_size, mode='same')
-        
-        # Find regions above threshold
-        active_regions = energy_smooth > (threshold * np.max(energy_smooth))
-        if np.any(active_regions):
-            # Find start and end of the main activity
-            start = np.argmax(active_regions)
-            end = len(signal) - np.argmax(active_regions[::-1])
-            
-            # Ensure minimum length and add small margins
-            min_length = 100  # Minimum length to keep
-            margin = 25  # Margin around active region
-            
-            if end - start < min_length:
-                center = (start + end) // 2
-                start = max(0, center - min_length // 2)
-                end = min(len(signal), center + min_length // 2)
-            
-            # Add margins
-            start = max(0, start - margin)
-            end = min(len(signal), end + margin)
-            
-            trimmed_signals.append(signal[start:end])
-        else:
-            # If no region above threshold, keep the original
-            trimmed_signals.append(signal)
-    
-    return trimmed_signals
-
-
-def apply_adaptive_trimming(signal_dict):
-    # Apply to both horizontal and vertical signals
-    trimmed_signal_dict = {'horizontal': {}, 'vertical': {}}
-    
-    for direction in ['horizontal', 'vertical']:
-        for cls, signal_list in signal_dict[direction].items():
-            trimmed_signals = adaptive_trim_signal(signal_list)
-            trimmed_signal_dict[direction][cls] = trimmed_signals
-    
-    return trimmed_signal_dict
-
 
 def ar_coeffs_calc(signal_listOflists):
     extracted_coeffs = []
@@ -178,31 +131,21 @@ def wavelet_coeffs(signal):
     
     # First pass to find the maximum length
     for l in signal:
-        try:
-            y = wavedec(data=l, wavelet='db3', level=6)
-            coeffs = list(y[1]) + list(y[2]) + list(y[3]) + list(y[4])
-            max_coeffs_length = max(max_coeffs_length, len(coeffs))
-        except Exception as e:
-            print(f"Error in wavelet decomposition: {e}")
-            # Use a default size if decomposition fails
-            max_coeffs_length = max(max_coeffs_length, 100)
+        y = wavedec(data=l, wavelet='db3', level=6)
+        coeffs = list(y[1]) + list(y[2]) + list(y[3]) + list(y[4])
+        max_coeffs_length = max(max_coeffs_length, len(coeffs))
+
     
     # Second pass to create vectors of uniform length
     for l in signal:
-        try:
-            y = wavedec(data=l, wavelet='db3', level=6)
-            coeffs = list(y[1]) + list(y[2]) + list(y[3]) + list(y[4])
-            
-            # Pad with zeros if necessary to make all feature vectors the same length
-            if len(coeffs) < max_coeffs_length:
-                coeffs = coeffs + [0] * (max_coeffs_length - len(coeffs))
-            
-            decomposed.append(coeffs)
-        except Exception as e:
-            # If decomposition fails, add a vector of zeros
-            print(f"Using zeros for failed decomposition: {e}")
-            decomposed.append([0] * max_coeffs_length)
-    
+        y = wavedec(data=l, wavelet='db3', level=6)
+        coeffs = list(y[1]) + list(y[2]) + list(y[3]) + list(y[4])
+
+        # Pad with zeros if necessary to make all feature vectors the same length
+        if len(coeffs) < max_coeffs_length:
+            coeffs = coeffs + [0] * (max_coeffs_length - len(coeffs))
+        decomposed.append(coeffs)
+
     return decomposed
 
 
@@ -271,11 +214,9 @@ def merge_horizontal_vertical_features(h_v_features):
                 h_features = h_v_features['horizontal'][cls][i]
                 v_features = h_v_features['vertical'][cls][i]
                 
-                # Ensure both feature vectors are lists
                 h_features = list(h_features)
                 v_features = list(v_features)
                 
-                # Concatenate horizontal and vertical features
                 combined = h_features + v_features
                 merged_features[cls].append(combined)
     
@@ -339,77 +280,6 @@ def svm_classifier(features_dict, kernel='rbf', c=10):
     return svm, accuracy, label_encoder
 
 
-def optimize_svm(features_dict):
-    x = []
-    y = []
-    
-    # First, check if all feature vectors have the same length
-    feature_lengths = set()
-    for class_name, feature_sets in features_dict.items():
-        for feature_set in feature_sets:
-            feature_lengths.add(len(feature_set))
-    
-    if len(feature_lengths) > 1:
-        print(f"Warning: Found inconsistent feature vector lengths: {feature_lengths}")
-        
-        # Find the maximum length and pad shorter vectors
-        max_length = max(feature_lengths)
-        print(f"Standardizing all feature vectors to length {max_length}")
-        
-        for class_name, feature_sets in features_dict.items():
-            for i, feature_set in enumerate(feature_sets):
-                if len(feature_set) < max_length:
-                    # Pad with zeros
-                    features_dict[class_name][i] = list(feature_set) + [0] * (max_length - len(feature_set))
-    
-    # Now create feature vectors and labels
-    for class_name, feature_sets in features_dict.items():
-        for feature_set in feature_sets:
-            x.append(feature_set)
-            y.append(class_name)
-
-    label_encoder = LabelEncoder()
-    y_encoded = label_encoder.fit_transform(y)
-    X = np.array(x)
-    
-    # Standardize features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_encoded, test_size=0.3, random_state=42)
-    
-    # Define parameter grid
-    param_grid = {
-        'C': [1, 5, 10, 50, 100],
-        'gamma': ['scale', 'auto', 0.01, 0.1],
-        'kernel': ['rbf', 'linear', 'poly']
-    }
-    
-    # Use GridSearchCV for hyperparameter tuning
-    grid_search = GridSearchCV(
-        SVC(class_weight='balanced'), 
-        param_grid, 
-        cv=5, 
-        scoring='accuracy',
-        verbose=1
-    )
-    
-    # Fit the model
-    grid_search.fit(X_train, y_train)
-    
-    # Get best parameters
-    best_params = grid_search.best_params_
-    print(f"Best parameters: {best_params}")
-    
-    # Test with best parameters
-    best_model = grid_search.best_estimator_
-    y_pred = best_model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    print(f"Optimized Accuracy: {accuracy * 100:.2f}%")
-    
-    return best_model, accuracy, label_encoder
-
-
 def preprocess_data():
     eog_signal = read_paired_eog("X:/AH/24_25_2/HCI/Project/Dataset/class")
     
@@ -438,12 +308,21 @@ combined_by_direction = combine_features_by_direction(ar, wavelets, stats)
 merged_features = merge_horizontal_vertical_features(combined_by_direction)
 
 h_v_ar = merge_horizontal_vertical_features({'horizontal': ar['horizontal'], 'vertical': ar['vertical']})
+print("AR COEFFICIENTS MODEL ACCURACY")
 svm_classifier(h_v_ar, 'rbf', 10)
 
+
 h_v_wavelets = merge_horizontal_vertical_features({'horizontal': wavelets['horizontal'], 'vertical': wavelets['vertical']})
+print("wavelets COEFFICIENTS MODEL ACCURACY")
 svm_classifier(h_v_wavelets, 'rbf', 10)
 
+h_v_stat = merge_horizontal_vertical_features({'horizontal': stats['horizontal'], 'vertical': stats['vertical']})
+print("STATISTICAL COEFFICIENTS MODEL ACCURACY")
+svm_classifier(h_v_stat, 'rbf', 10)
+
+print("ALL FEATURES MODEL ACCURACY")
 svm_classifier(merged_features, 'rbf', 10)
+# optimize_svm(merged_features)
 
 
 
