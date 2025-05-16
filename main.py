@@ -1,13 +1,17 @@
 import os
+from typing import Any
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 from pywt import wavedec
 from scipy.signal import butter, filtfilt
 from statsmodels.tsa.ar_model import AutoReg
 from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+import openpyxl
+from openpyxl import Workbook
 
 
 def read_paired_eog(folder_path):
@@ -23,16 +27,17 @@ def read_paired_eog(folder_path):
         for file in files:
             if file.endswith('h.txt'):
                 with open(os.path.join(class_path, file), 'r') as f:
+                    # print(file)
                     signal = [int(line.strip()) for line in f]
                     h_signals.append(signal)
             elif file.endswith('v.txt'):
                 with open(os.path.join(class_path, file), 'r') as f:
+                    # print(file)
                     signal = [int(line.strip()) for line in f]
                     v_signals.append(signal)
 
         class_data['horizontal'][folder] = h_signals
         class_data['vertical'][folder] = v_signals
-
     return class_data
 
 
@@ -107,7 +112,7 @@ def apply_normalization(filtered_signal_dict):
 def ar_coeffs_calc(signal_listOflists):
     extracted_coeffs = []
     for l in signal_listOflists:
-        model = AutoReg(l, lags=16)
+        model = AutoReg(l, lags=4)
         model_fit = model.fit()
         ar_coeffs = model_fit.params
         extracted_coeffs.append(list(ar_coeffs))
@@ -189,13 +194,10 @@ def merge_horizontal_vertical_features(h_v_features):
     for cls in h_v_features['horizontal'].keys():
         merged_features[cls] = []
         
-        # Make sure we have same number of samples in both directions
         min_samples = min(len(h_v_features['horizontal'][cls]), len(h_v_features['vertical'][cls]))
         
         for i in range(min_samples):
-            # Check if features exist in both directions
             if i < len(h_v_features['horizontal'][cls]) and i < len(h_v_features['vertical'][cls]):
-                # Get horizontal and vertical features
                 h_features = h_v_features['horizontal'][cls][i]
                 v_features = h_v_features['vertical'][cls][i]
                 
@@ -208,30 +210,11 @@ def merge_horizontal_vertical_features(h_v_features):
     return merged_features
 
 
-def svm_classifier(features_dict, kernel='rbf', c=10):
+def svm_classifier(features_dict, kernel='rbf', c=1):
+    print(len(features_dict['Blink'][0]))
     x = []
     y = []
-    
-    # First, check if all feature vectors have the same length
-    feature_lengths = set()
-    for class_name, feature_sets in features_dict.items():
-        for feature_set in feature_sets:
-            feature_lengths.add(len(feature_set))
-    print(feature_lengths)
-    if len(feature_lengths) > 1:
-        print(f"Warning: Found inconsistent feature vector lengths: {feature_lengths}")
-        
-        # Find the maximum length and pad shorter vectors
-        max_length = max(feature_lengths)
-        print(f"Standardizing all feature vectors to length {max_length}")
-        
-        for class_name, feature_sets in features_dict.items():
-            for i, feature_set in enumerate(feature_sets):
-                if len(feature_set) < max_length:
-                    # Pad with zeros
-                    features_dict[class_name][i] = list(feature_set) + [0] * (max_length - len(feature_set))
-    
-    # Now create feature vectors and labels
+
     for class_name, feature_sets in features_dict.items():
         for feature_set in feature_sets:
             x.append(feature_set)
@@ -243,17 +226,17 @@ def svm_classifier(features_dict, kernel='rbf', c=10):
     X = np.array(x)
     
     # Apply standardization
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    # scaler = StandardScaler()
+    # X_scaled = scaler.fit_transform(X)
     
-    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_encoded, test_size=0.3, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
 
     svm = SVC(kernel=kernel, C=c, gamma='scale', class_weight='balanced')
     svm.fit(X_train, y_train)
 
     y_pred = svm.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
-    print(f"Accuracy: {accuracy * 100:.2f}%")
+    print(f"Validation Accuracy: {accuracy * 100:.2f}%")
     # class_names = label_encoder.classes_
     # print(classification_report(y_test, y_pred, target_names=class_names))
     # cm = confusion_matrix(y_test, y_pred)
@@ -261,50 +244,126 @@ def svm_classifier(features_dict, kernel='rbf', c=10):
     # disp.plot(cmap='Blues')
     # plt.title("Confusion Matrix")
     # plt.show()
-    
+    # joblib.dump(svm, model_name)
     return svm, accuracy, label_encoder
 
 
 def preprocess_data():
     eog_signal = read_paired_eog("X:/AH/24_25_2/HCI/Project/Dataset/class")
-    
     filtered_signal = apply_bandpass_filter(eog_signal)
-    
     dc_free_signal = apply_dc_removal(filtered_signal)
-    
     normalized_signal = apply_normalization(dc_free_signal)
-    
-    # trimmed_signal = apply_adaptive_trimming(normalized_signal)
-    
+
     return normalized_signal, eog_signal
 
 
+def save_eog_to_csv(eog: dict[str, dict], filename: str) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "EOG_Data"
 
-preprocessed_data, eog = preprocess_data()
+    max_len = 0
+    for direction in eog:
+        for class_name in eog[direction]:
+            for signal in eog[direction][class_name]:
+                max_len = max(max_len, len(signal))
 
-ar = extract_AR_coefficients(preprocessed_data)
+    headers = ['Direction', 'Class', 'Sample_Number'] + [f'Value_{i + 1}' for i in range(max_len)]
+    ws.append(headers)
 
-wavelets = extract_wavelet_coeffs(preprocessed_data)
+    for direction in ['horizontal', 'vertical']:
+        for class_name, signals in eog[direction].items():
+            for i, signal_data in enumerate(signals):
+                row_data = [direction, class_name, i + 1] + signal_data + [''] * (max_len - len(signal_data))
+                ws.append(row_data)
 
-stats = extract_all_statistical_features(preprocessed_data)
-
-combined_by_direction = combine_features_by_direction(ar, wavelets, stats)
-
-merged_features = merge_horizontal_vertical_features(combined_by_direction)
-
-h_v_ar = merge_horizontal_vertical_features({'horizontal': ar['horizontal'], 'vertical': ar['vertical']})
-print("AR COEFFICIENTS MODEL ACCURACY")
-svm_classifier(h_v_ar, 'rbf', 10)
+    wb.save(filename if filename.endswith('.xlsx') else filename + '.xlsx')
 
 
-h_v_wavelets = merge_horizontal_vertical_features({'horizontal': wavelets['horizontal'], 'vertical': wavelets['vertical']})
-print("wavelets COEFFICIENTS MODEL ACCURACY")
-svm_classifier(h_v_wavelets, 'rbf', 10)
+def save_merged_features_to_excel(merged_features: dict[Any, list], filename: str) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Merged_Features"
 
-h_v_stat = merge_horizontal_vertical_features({'horizontal': stats['horizontal'], 'vertical': stats['vertical']})
-print("STATISTICAL COEFFICIENTS MODEL ACCURACY")
-svm_classifier(h_v_stat, 'rbf', 10)
+    max_len = 0
+    for class_name in merged_features:
+        for feature_vector in merged_features[class_name]:
+            max_len = max(max_len, len(feature_vector))
 
-print("ALL FEATURES MODEL ACCURACY")
-svm_classifier(merged_features, 'rbf', 10)
+    headers = ['Class', 'Sample_Number'] + [f'Feature_{i + 1}' for i in range(max_len)]
+    ws.append(headers)
 
+    for class_name, feature_vectors in merged_features.items():
+        for i, feature_vector in enumerate(feature_vectors):
+            row_data = [class_name, i + 1] + list(feature_vector) + [''] * (max_len - len(feature_vector))
+            ws.append(row_data)
+
+    wb.save(filename if filename.endswith('.xlsx') else filename + '.xlsx')
+
+
+def preprocess_single_signal(h_signal, v_signal):
+    temp_dict = {'horizontal': {}, 'vertical': {}}
+    temp_dict['horizontal']['temp_class'] = [h_signal]
+    temp_dict['vertical']['temp_class'] = [v_signal]
+
+    filtered_dict = apply_bandpass_filter(temp_dict)
+
+    dc_removed_dict = apply_dc_removal(filtered_dict)
+    normalized_dict = apply_normalization(dc_removed_dict)
+
+    return normalized_dict
+
+
+def extract_features_single_signal(preprocessed_temp_dict: dict):
+
+    ar_coeffs = extract_AR_coefficients(preprocessed_temp_dict)
+    wavelet_coeffs = extract_wavelet_coeffs(preprocessed_temp_dict)
+    stat_features = extract_all_statistical_features(preprocessed_temp_dict)
+
+    combined = combine_features_by_direction(ar_coeffs, wavelet_coeffs, stat_features)
+
+    merged_features = merge_horizontal_vertical_features(combined)
+
+    return merged_features['temp_class'][0]
+
+
+
+def work():
+    preprocessed_data, eog = preprocess_data()
+
+    ar = extract_AR_coefficients(preprocessed_data)
+
+    wavelets = extract_wavelet_coeffs(preprocessed_data)
+
+
+    stats = extract_all_statistical_features(preprocessed_data)
+
+
+    combined_by_direction = combine_features_by_direction(ar, wavelets, stats)
+
+    merged_features = merge_horizontal_vertical_features(combined_by_direction)
+
+    # print(f"All Lengths = {len(merged_features['Blink'][0])}")
+    # print(merged_features['Blink'][0][:87])
+    # h_v_ar = merge_horizontal_vertical_features({'horizontal': ar['horizontal'], 'vertical': ar['vertical']})
+    # print("AR COEFFICIENTS MODEL ACCURACY")
+    # svm_classifier(h_v_ar, "AR", 'rbf', 10, )
+    #
+    # h_v_wavelets = merge_horizontal_vertical_features(
+    #     {'horizontal': wavelets['horizontal'], 'vertical': wavelets['vertical']})
+    # print("wavelets COEFFICIENTS MODEL ACCURACY")
+    # svm_classifier(h_v_wavelets, "wavelets", 'rbf', 10)
+    #
+    # h_v_stat = merge_horizontal_vertical_features({'horizontal': stats['horizontal'], 'vertical': stats['vertical']})
+    # print("STATISTICAL COEFFICIENTS MODEL ACCURACY")
+    # svm_classifier(h_v_stat, "Stat",  'rbf', 10)
+
+    # print("ALL FEATURES MODEL ACCURACY")
+    svm, accuracy, label_encoder = svm_classifier(merged_features, 'rbf',  1)
+    joblib.dump(svm, 'svm_model.pkl')
+    joblib.dump(label_encoder, "label_encoder.pkl")
+    # joblib.dump(scaler, "scaler.pkl")
+
+
+if __name__ == "__main__":
+    work()
