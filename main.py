@@ -188,6 +188,20 @@ def combine_features_by_direction(ar, wavelets, stats):
     return combined
 
 
+def combine_single_feature_by_direction(feature_dict):
+    combined = {}
+
+    for direction in ['horizontal', 'vertical']:
+        for cls, feature_lists in feature_dict[direction].items():
+            if cls not in combined:
+                combined[cls] = []
+            for feature_vector in feature_lists:
+                combined[cls].append(feature_vector)
+
+    return combined
+
+
+
 def merge_horizontal_vertical_features(h_v_features):
     merged_features = {}
     
@@ -211,7 +225,7 @@ def merge_horizontal_vertical_features(h_v_features):
 
 
 def svm_classifier(features_dict, kernel='rbf', c=1):
-    print(len(features_dict['Blink'][0]))
+    # print(len(features_dict['Blink'][0]))
     x = []
     y = []
 
@@ -224,10 +238,7 @@ def svm_classifier(features_dict, kernel='rbf', c=1):
     y_encoded = label_encoder.fit_transform(y)
     
     X = np.array(x)
-    
-    # Apply standardization
-    # scaler = StandardScaler()
-    # X_scaled = scaler.fit_transform(X)
+
     
     X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
 
@@ -235,8 +246,11 @@ def svm_classifier(features_dict, kernel='rbf', c=1):
     svm.fit(X_train, y_train)
 
     y_pred = svm.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    print(f"Validation Accuracy: {accuracy * 100:.2f}%")
+
+    train_accuracy = accuracy_score(y_train, svm.predict(X_train))
+    test_accuracy = accuracy_score(y_test, y_pred)
+    print(f"Train Accuracy: {train_accuracy * 100:.2f}%")
+    print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
     # class_names = label_encoder.classes_
     # print(classification_report(y_test, y_pred, target_names=class_names))
     # cm = confusion_matrix(y_test, y_pred)
@@ -245,7 +259,7 @@ def svm_classifier(features_dict, kernel='rbf', c=1):
     # plt.title("Confusion Matrix")
     # plt.show()
     # joblib.dump(svm, model_name)
-    return svm, accuracy, label_encoder
+    return svm, test_accuracy, label_encoder
 
 
 def preprocess_data():
@@ -257,7 +271,7 @@ def preprocess_data():
     return normalized_signal, eog_signal
 
 
-def save_eog_to_csv(eog: dict[str, dict], filename: str) -> None:
+def save_eog_to_excel(eog: dict[str, dict], filename: str) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "EOG_Data"
@@ -343,26 +357,21 @@ def work():
 
     merged_features = merge_horizontal_vertical_features(combined_by_direction)
 
-    # print(f"All Lengths = {len(merged_features['Blink'][0])}")
-    # print(merged_features['Blink'][0][:87])
-    # h_v_ar = merge_horizontal_vertical_features({'horizontal': ar['horizontal'], 'vertical': ar['vertical']})
-    # print("AR COEFFICIENTS MODEL ACCURACY")
-    # svm_classifier(h_v_ar, "AR", 'rbf', 10, )
-    #
-    # h_v_wavelets = merge_horizontal_vertical_features(
-    #     {'horizontal': wavelets['horizontal'], 'vertical': wavelets['vertical']})
-    # print("wavelets COEFFICIENTS MODEL ACCURACY")
-    # svm_classifier(h_v_wavelets, "wavelets", 'rbf', 10)
-    #
-    # h_v_stat = merge_horizontal_vertical_features({'horizontal': stats['horizontal'], 'vertical': stats['vertical']})
-    # print("STATISTICAL COEFFICIENTS MODEL ACCURACY")
-    # svm_classifier(h_v_stat, "Stat",  'rbf', 10)
 
-    # print("ALL FEATURES MODEL ACCURACY")
-    svm, accuracy, label_encoder = svm_classifier(merged_features, 'rbf',  1)
-    joblib.dump(svm, 'svm_model.pkl')
-    joblib.dump(label_encoder, "label_encoder.pkl")
-    # joblib.dump(scaler, "scaler.pkl")
+    combined_ar = combine_single_feature_by_direction(ar)
+    print("SVM using AR features")
+    svm_classifier(combined_ar, 'rbf', 5)
+    combined_wave = combine_single_feature_by_direction(wavelets)
+    print("\nSVM using wavelets features")
+    svm_classifier(combined_wave, 'rbf', 5)
+    combined_stat = combine_single_feature_by_direction(stats)
+    print("\nSVM using statistical features")
+    svm_classifier(combined_stat, 'rbf', 5)
+    print("\nSVM using combined features")
+    svm_classifier(merged_features, 'rbf',  5)
+
+    # joblib.dump(svm, 'svm_model.pkl')
+    # joblib.dump(label_encoder, "label_encoder.pkl")
 
 
 if __name__ == "__main__":
