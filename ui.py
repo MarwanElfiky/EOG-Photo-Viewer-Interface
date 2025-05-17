@@ -12,18 +12,14 @@ import main
 global photo
 
 folder_path = "X:/AH/24_25_2/HCI/Project/HCI-PROJECT/images"
-image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))])
+image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
 current_index = 0
 
 svm_model = joblib.load("svm_model.pkl")
-label_encoder = joblib.load("label_encoder.pkl") if os.path.exists("label_encoder.pkl") else None
+label_encoder = joblib.load("label_encoder.pkl")
 
-if svm_model:
+if svm_model and label_encoder:
     print("Model Is lock and loaded\n")
-
-
-test_window = None
-result_label = None
 
 
 def show_image():
@@ -60,14 +56,12 @@ def test():
     h_signal = load_signal_file(filedialog.askopenfilename(title="Choose horizontal signal"))
     v_signal = load_signal_file(filedialog.askopenfilename(title="Choose vertical signal"))
     preprocessed_dict = main.preprocess_single_signal(h_signal, v_signal)
-    # print((preprocessed_dict['horizontal']['temp_class']))
     extracted_features = main.extract_features_single_signal(preprocessed_dict)
-    # print(len(extracted_features))
     X = np.array(extracted_features).reshape(1, -1)
 
     prediction = svm_model.predict(X)
-    print(prediction)
     predicted_class = label_encoder.inverse_transform(prediction)[0]
+    print(predicted_class)
 
 
     if predicted_class == "Right":
@@ -84,7 +78,7 @@ def test():
 
 
 root = tk.Tk()
-root.title("Image Viewer")
+root.title("EOG PHOTO VIEWER INTERFACE")
 root.geometry("1080x700")
 
 image_label = Label(root)

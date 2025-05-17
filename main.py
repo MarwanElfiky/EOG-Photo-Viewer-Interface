@@ -50,7 +50,7 @@ def plot_signal(signal, title="Signal Plot"):
     plt.show()
 
 
-def bandpass_butter_filter(signal, fs=176, lowcut=1, highcut=20, order=2):
+def bandpass_butter_filter(signal, fs=176, lowcut=1, highcut=22, order=2):
     nyquist = 0.5 * fs
     low = lowcut / nyquist
     high = highcut / nyquist
@@ -224,15 +224,15 @@ def merge_horizontal_vertical_features(h_v_features):
     return merged_features
 
 
-def svm_classifier(features_dict, kernel='rbf', c=1):
+def svm_classifier(features_dict, c, kernel='rbf'):
     # print(len(features_dict['Blink'][0]))
     x = []
     y = []
 
-    for class_name, feature_sets in features_dict.items():
+    for cls, feature_sets in features_dict.items():
         for feature_set in feature_sets:
             x.append(feature_set)
-            y.append(class_name)
+            y.append(cls)
 
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(y)
@@ -240,9 +240,9 @@ def svm_classifier(features_dict, kernel='rbf', c=1):
     X = np.array(x)
 
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.25, random_state=42)
 
-    svm = SVC(kernel=kernel, C=c, gamma='scale', class_weight='balanced')
+    svm = SVC(kernel=kernel, C=c)
     svm.fit(X_train, y_train)
 
     y_pred = svm.predict(X_test)
@@ -259,7 +259,7 @@ def svm_classifier(features_dict, kernel='rbf', c=1):
     # plt.title("Confusion Matrix")
     # plt.show()
     # joblib.dump(svm, model_name)
-    return svm, test_accuracy, label_encoder
+    return svm, label_encoder
 
 
 def preprocess_data():
@@ -271,7 +271,7 @@ def preprocess_data():
     return normalized_signal, eog_signal
 
 
-def save_eog_to_excel(eog: dict[str, dict], filename: str) -> None:
+def save_eog_to_excel(eog: dict[str, dict], filename: str):
     wb = Workbook()
     ws = wb.active
     ws.title = "EOG_Data"
@@ -288,13 +288,13 @@ def save_eog_to_excel(eog: dict[str, dict], filename: str) -> None:
     for direction in ['horizontal', 'vertical']:
         for class_name, signals in eog[direction].items():
             for i, signal_data in enumerate(signals):
-                row_data = [direction, class_name, i + 1] + signal_data + [''] * (max_len - len(signal_data))
+                row_data = [direction, class_name, i + 1] + signal_data
                 ws.append(row_data)
 
     wb.save(filename if filename.endswith('.xlsx') else filename + '.xlsx')
 
 
-def save_merged_features_to_excel(merged_features: dict[Any, list], filename: str) -> None:
+def save_merged_features_to_excel(merged_features: dict[Any, list], filename: str):
     wb = Workbook()
     ws = wb.active
     ws.title = "Merged_Features"
@@ -309,7 +309,7 @@ def save_merged_features_to_excel(merged_features: dict[Any, list], filename: st
 
     for class_name, feature_vectors in merged_features.items():
         for i, feature_vector in enumerate(feature_vectors):
-            row_data = [class_name, i + 1] + list(feature_vector) + [''] * (max_len - len(feature_vector))
+            row_data = [class_name, i + 1] + list(feature_vector)
             ws.append(row_data)
 
     wb.save(filename if filename.endswith('.xlsx') else filename + '.xlsx')
@@ -356,19 +356,20 @@ def work():
     combined_by_direction = combine_features_by_direction(ar, wavelets, stats)
 
     merged_features = merge_horizontal_vertical_features(combined_by_direction)
+    # print(len(merged_features['Blink'][0]))
 
+    # combined_ar = combine_single_feature_by_direction(ar)
+    # print("SVM using AR features")
+    # svm_classifier(combined_ar, 'rbf', 5)
+    # combined_wave = combine_single_feature_by_direction(wavelets)
+    # print("\nSVM using wavelets features")
+    # svm_classifier(combined_wave, 'rbf', 5)
+    # combined_stat = combine_single_feature_by_direction(stats)
+    # print("\nSVM using statistical features")
+    # svm_classifier(combined_stat, 'rbf', 5)
+    # print("\nSVM using combined features")
+    svm, label_encoder = svm_classifier(merged_features, 5, 'rbf')
 
-    combined_ar = combine_single_feature_by_direction(ar)
-    print("SVM using AR features")
-    svm_classifier(combined_ar, 'rbf', 5)
-    combined_wave = combine_single_feature_by_direction(wavelets)
-    print("\nSVM using wavelets features")
-    svm_classifier(combined_wave, 'rbf', 5)
-    combined_stat = combine_single_feature_by_direction(stats)
-    print("\nSVM using statistical features")
-    svm_classifier(combined_stat, 'rbf', 5)
-    print("\nSVM using combined features")
-    svm_classifier(merged_features, 'rbf',  5)
 
     # joblib.dump(svm, 'svm_model.pkl')
     # joblib.dump(label_encoder, "label_encoder.pkl")
